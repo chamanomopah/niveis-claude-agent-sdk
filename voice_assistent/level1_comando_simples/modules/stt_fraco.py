@@ -131,13 +131,12 @@ class STTFraco:
                             phrase_time_limit=10,
                         )
 
-                    # Try to recognize using PocketSphinx (offline)
+                    # Try Google Speech Recognition first (better for Portuguese)
                     try:
-                        # Use Sphinx for offline recognition
-                        texto = self.recognizer.recognize_sphinx(audio, language="pt-BR")
+                        texto = self.recognizer.recognize_google(audio, language="pt-BR")
                         texto_upper = texto.upper().strip()
 
-                        self.logger.debug(f"Heard: '{texto}'")
+                        self.logger.debug(f"Heard (Google): '{texto}'")
 
                         # Check if any wake word was detected
                         for wake_word in wake_words:
@@ -153,17 +152,18 @@ class STTFraco:
                         self.logger.debug("Speech detected but not recognized")
                         continue
                     except sr.RequestError as e:
-                        # Sphinx not installed or not working
-                        self.logger.error(f"Sphinx recognition failed: {e}")
-                        # Try Google Speech Recognition as fallback (requires internet)
+                        # Google API error, try PocketSphinx as fallback
+                        self.logger.debug(f"Google recognition failed: {e}, trying Sphinx...")
                         try:
-                            texto = self.recognizer.recognize_google(audio, language="pt-BR")
+                            # Try Sphinx with English (better than no Portuguese)
+                            texto = self.recognizer.recognize_sphinx(audio, language="en-US")
                             texto_upper = texto.upper().strip()
 
-                            self.logger.debug(f"Heard (Google): '{texto}'")
+                            self.logger.debug(f"Heard (Sphinx): '{texto}'")
 
                             for wake_word in wake_words:
-                                if wake_word.upper() in texto_upper:
+                                # Check basic wake word "NERO" which works in English too
+                                if "NERO" in wake_word.upper() and "NERO" in texto_upper:
                                     self.logger.complete(f"Wake word detected: '{wake_word}'")
                                     result["detected"] = True
                                     result["palavra"] = wake_word
@@ -228,8 +228,8 @@ class STTFraco:
                             )
 
                         try:
-                            # Try to recognize using Sphinx
-                            texto = self.recognizer.recognize_sphinx(audio, language="pt-BR")
+                            # Try Google first (better for Portuguese)
+                            texto = self.recognizer.recognize_google(audio, language="pt-BR")
                             texto_upper = texto.upper().strip()
 
                             self.logger.debug(f"Stop check heard: '{texto}'")
@@ -249,14 +249,16 @@ class STTFraco:
                         except sr.UnknownValueError:
                             # Not understood, continue listening
                             continue
-                        except sr.RequestError:
-                            # Try Google fallback
+                        except sr.RequestError as e:
+                            # Google API error, try Sphinx as fallback
+                            self.logger.debug(f"Google recognition failed: {e}, trying Sphinx...")
                             try:
-                                texto = self.recognizer.recognize_google(audio, language="pt-BR")
+                                texto = self.recognizer.recognize_sphinx(audio, language="en-US")
                                 texto_upper = texto.upper().strip()
 
                                 for stop_word in stop_words:
-                                    if stop_word.upper() in texto_upper:
+                                    # Check basic stop words that work in English too
+                                    if "ENVIAR" in stop_word.upper() and "ENVIAR" in texto_upper:
                                         self.logger.stop_word(f"Stop word detected: '{stop_word}'")
                                         self._stop_word_detected = True
                                         self._stop_word_queue.put({
