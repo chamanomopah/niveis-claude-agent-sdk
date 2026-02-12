@@ -29,6 +29,7 @@ import asyncio
 import os
 import sys
 import signal
+import queue
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -218,36 +219,90 @@ class NeroAssistant:
         """
         self.state_machine.transitar("GRAVANDO")
         self.logger.recording("Listening for your prompt...")
+        self.logger.info("Speak your prompt. Say 'NERO ENVIAR' when done.")
 
-        # For simplicity, record audio for a fixed duration
-        # In production, this would use streaming with stop word detection
         import speech_recognition as sr
 
         r = sr.Recognizer()
         mic = sr.Microphone()
+        audio_chunks = []
+        stop_word_queue = queue.Queue()
+
+        def on_stop_word_detected(stop_word: str) -> None:
+            """Callback when stop word is detected."""
+            self.logger.stop_word(f"Stop word detected: '{stop_word}'")
+            stop_word_queue.put(stop_word)
 
         try:
+            # Start background stop word detection
+            self.logger.debug("Starting background stop word detection...")
+            self.stt_fraco.aguardar_palavra_parada(
+                stop_words=self.stop_words,
+                callback=on_stop_word_detected,
+                timeout_segundos=self.recording_timeout,
+            )
+
             with mic as source:
-                # Listen for prompt (with timeout)
-                self.logger.info(f"Recording... (max {self.recording_timeout}s)")
-                audio = r.listen(source, timeout=self.recording_timeout, phrase_time_limit=60)
+                self.logger.recording(f"Recording... (max {self.recording_timeout}s)")
+                self.logger.info("Say 'NERO ENVIAR' to finish early")
 
-            # Transcribe using Deepgram
-            audio_data = audio.get_wav_data()
-            transcricao = await self.stt_forte.transcrever_audio_file(audio_data)
+                start_time = asyncio.get_event_loop().time()
 
-            if transcricao:
-                self.logger.transcript(f"'{transcricao}'")
-                return transcricao
+                # Recording loop with continuous listening
+                while True:
+                    # Check for stop word
+                    try:
+                        detected = stop_word_queue.get_nowait()
+                        self.logger.complete(f"Recording stopped by: {detected}")
+                        break
+                    except queue.Empty:
+                        pass
+
+                    # Check timeout
+                    elapsed = asyncio.get_event_loop().time() - start_time
+                    if elapsed >= self.recording_timeout:
+                        self.logger.warning(f"Recording timeout after {elapsed:.1f}s")
+                        break
+
+                    # Listen for next phrase (no phrase_time_limit)
+                    try:
+                        # Listen with short timeout to allow checking stop word queue
+                        audio = r.listen(source, timeout=2, phrase_time_limit=None)
+                        audio_chunks.append(audio.get_wav_data())
+                        self.logger.debug(f"Audio chunk recorded ({elapsed:.1f}s elapsed)")
+                    except sr.WaitTimeoutError:
+                        # No speech for 2 seconds, continue loop to check stop word
+                        continue
+
+            # Stop background detection
+            self.stt_fraco.stop_detection()
+
+            # Combine all audio chunks
+            if audio_chunks:
+                import wave
+                import io
+
+                # Combine WAV data
+                combined_audio = b"".join(audio_chunks)
+
+                self.logger.transcribing(f"Transcribing {len(audio_chunks)} audio chunks...")
+
+                # Transcribe using Deepgram
+                transcricao = await self.stt_forte.transcrever_audio_file(combined_audio)
+
+                if transcricao:
+                    self.logger.transcript(f"'{transcricao}'")
+                    return transcricao
+                else:
+                    self.logger.warning("Transcription failed or empty")
+                    return ""
             else:
-                self.logger.warning("Transcription failed or empty")
+                self.logger.warning("No audio recorded")
                 return ""
 
-        except sr.WaitTimeoutError:
-            self.logger.warning("No speech detected (timeout)")
-            return ""
         except Exception as e:
             self.logger.error("Recording failed", e)
+            self.stt_fraco.stop_detection()
             return ""
 
     async def estado_processando(self, transcricao: str) -> bool:
