@@ -1,5 +1,0 @@
-ERROR: usage: __main__.py [options] [file_or_dir] [file_or_dir] [...]
-__main__.py: error: unrecognized arguments: --timeout=60
-  inifile: C:\Users\JOSE\Downloads\niveis_claude_agent_SDK\voice_assistent\level1_comando_simples\pytest.ini
-  rootdir: C:\Users\JOSE\Downloads\niveis_claude_agent_SDK\voice_assistent\level1_comando_simples
-
