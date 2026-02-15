@@ -55,7 +55,15 @@ class NeroLogger:
         Args:
             verbose: Enable debug-level logging
         """
-        self.console = Console()
+        import sys
+        import io
+
+        # Set UTF-8 encoding for Windows console
+        if sys.platform == "win32":
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+        self.console = Console(legacy_windows=False)
         self.verbose = verbose
 
     def _get_timestamp(self) -> str:

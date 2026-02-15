@@ -455,7 +455,7 @@ async def main() -> int:
         return 0
 
     except Exception as e:
-        print(f"❌ Fatal error: {e}")
+        print(f"[X] Fatal error: {e}")
         return 1
 
 
